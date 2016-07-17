@@ -1,0 +1,6 @@
+# Python bytecode
+__pycache__
+
+# data files
+reviews_Books_5.json.gz
+reviews_Books_5.json
