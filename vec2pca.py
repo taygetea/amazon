@@ -1,33 +1,29 @@
-from gensim.models import Word2Vec
+import codecs
 import logging
-from nltk.corpus import stopwords
-import nltk.data
 import os
+import re
 import time
+from multiprocessing import Pool, Process
+
+import nltk.data
 import pandas as pd
 import plac
-import re
-import codecs
-from multiprocessing import Process, Pool
+from gensim.models import Word2Vec
+from nltk.corpus import stopwords
 from sklearn.decomposition import PCA
-logging.basicConfig(format='%(asctime)s %(levelname)s: %(message)s', level=logging.INFO, datefmt='%H:%M:%S')
 
-# Experimental multiprocess tokenization
+logging.basicConfig(format='%(asctime)s %(levelname)s: %(message)s',
+                    level=logging.INFO, datefmt='%H:%M:%S')
 
-"""
-sentences = []
-for document in inputdata:
-    sentences += to_sentences(document, tokenizer, remove_stopwords=False)
-"""
 
 def multitokenize(inputdata, processes=4, chunkfactor=10):
-
+    """
+    Experimental multiprocess tokenization
+    """
     def chunks(l, n):
-        n = int(len(l)/n)
+        n = int(len(l) / n)
         for i in range(0, len(l), n):
-            yield l[i:i+n]
-
-
+            yield l[i:i + n]
 
     pool = Pool(processes=processes)
 
@@ -39,13 +35,14 @@ def multitokenize(inputdata, processes=4, chunkfactor=10):
         sentences.extend(section)
     return sentences
 
-# convert a string of text to a list of words
-def separate_words(document, remove_urls=True, remove_stopwords=False):
 
+def separate_words(document, remove_urls=True, remove_stopwords=False):
+    """
+    Converts a string of text into a list of words.
+    """
     wordlists = []
     for review in document:
         wordlist = re.sub("[^a-zA-Z]", " ", review).lower().split()
-
         if remove_stopwords:
             stops = set(stopwords.words("english"))
             wordlist = [w for w in wordlist if w not in stops]
@@ -53,21 +50,20 @@ def separate_words(document, remove_urls=True, remove_stopwords=False):
     return wordlists
 
 
-# parse a document to sentences
 def to_reviews(document, remove_stopwords=False, remove_urls=False):
-
-
+    """
+    Parses a document into sentences.
+    """
     tokenizer = nltk.data.load("tokenizers/punkt/english.pickle")
 
     sentences = tokenizer.tokenize(document.strip())
     sentences = [separate_words(sentence, remove_stopwords, remove_urls)
                  for sentence in sentences if len(sentence) > 0]
-    # import pdb; pdb.set_trace()
-
     return sentences
-# train a model
+
+
 def train(sentences, features=100, mincount=200, workers=4, context=10,
-        sample=1e-3, save=False, precomp=True):
+          sample=1e-3, save=False, precomp=True):
     model = Word2Vec(sentences,
                      sg=1,
                      workers=workers,
@@ -79,24 +75,25 @@ def train(sentences, features=100, mincount=200, workers=4, context=10,
         model.init_sims(replace=True)
     if save:
         savestrip = "".join(save.split(".")[:-1])
-        model.save(os.path.join(savestrip+".model"))
+        model.save(os.path.join(savestrip + ".model"))
     logging.info("Training complete. Output contains %d words with %d features" %
-            (model.syn0.size, model.syn0[0].size))
+                 (model.syn0.size, model.syn0[0].size))
     return model
 
 
 def run_pca(df, outfile="components.csv", n_components=9):
     pca = PCA(n_components)
     pc = pca.fit_transform(df)
-    component_names = ["PC"+str(x) for x in range(0,len(pc[0]+1))]
+    component_names = ["PC" + str(x) for x in range(0, len(pc[0] + 1))]
     df2 = pd.DataFrame(pc, index=df.index, columns=component_names)
-    wordcomponents = pd.DataFrame([df2.sort_values(by=x).index for x in component_names]).transpose()
+    wordcomponents = pd.DataFrame(
+        [df2.sort_values(by=x).index for x in component_names]).transpose()
 
     def disprow(row):
         if row == 1:
-            r = wordcomponents.iloc[:1,0:n_components]
+            r = wordcomponents.iloc[:1, 0:n_components]
         elif row == -1:
-            r = wordcomponents.iloc[-1:,0:n_components]
+            r = wordcomponents.iloc[-1:, 0:n_components]
         r = r.to_string(header=False, index=False).split(" ")
         r = "".join([(x).ljust(15) for x in r if x.strip()])
         return r
@@ -105,24 +102,18 @@ def run_pca(df, outfile="components.csv", n_components=9):
     logging.info(disprow(1))
     logging.info(disprow(-1))
 
-
     wordcomponents.to_csv(outfile)
     logging.info("Components saved at " + os.getcwd() + "/outputs/" + outfile)
-    html_table = wordcomponents.to_html(index=False, classes=["centered", "striped"])
+    html_table = wordcomponents.to_html(
+        index=False, classes=["centered", "striped"])
     with open(outfile, 'w+') as f:
         f.write(''.join(html_table))
     return wordcomponents
 
 
-
 def vec2pca(fname, output, content=None):
-
-
-    inputdata = pd.Series(codecs.open(fname, "r", "utf-8").readlines()).dropna()
-
-    # sentences = []
-    # for document in inputdata:
-    #     sentences += to_sentences(document, tokenizer)
+    inputdata = pd.Series(codecs.open(
+        fname, "r", "utf-8").readlines()).dropna()
 
     sentences = multitokenize(". ".join(inputdata), processes=4)
     model = train(sentences)
@@ -130,11 +121,9 @@ def vec2pca(fname, output, content=None):
     keys = list(model.vocab.keys())
     df = pd.DataFrame(model[keys], index=keys)
 
-
     pcs = run_pca(df, outfile=output)
     return df, pcs
 
 
 if __name__ == "__main__":
-    # vec2pca(filename, outputfile)
     plac.call(vec2pca)
